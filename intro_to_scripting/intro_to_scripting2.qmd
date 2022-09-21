@@ -1,0 +1,219 @@
+---
+title: Modules and the "main" script
+format: 
+  html:
+    code-fold: false 
+---
+### Organising your code in Python
+
+In Python every file can be both a script and a module. The difference between them is that a script is designed to be used
+by a user, but a module is to be designed in another module or a script.
+
+Python has built in modules like `sys` and `math` and add-on modules like those provided by [biopython](https://biopython.org/)
+and [requests](https://requests.readthedocs.io/en/latest/). In simple terms, a file called `mymod.py` can be import as
+`import mymod` so long as the `mymod.py` is in the current directory or any directory mentioned in the `sys.path` variable.
+
+This allows you, for example, to put functions that are going to re-use in multiple scripts in a file called `myutils.py` and then
+`from myutils import myfunc1` as needed. On the other hand, the fact that files can be both scripts and modules means that we
+need to organise our code inside the file to ensure that it is used correctly, no matter if our Python file is being used as a
+script or a module. We do this using a simple convention, illustrated by this code in a file called `evolve.py`:
+
+```python
+#!/usr/bin/env python3
+
+import sys
+from random import random, choice
+
+def mutate(dna, mutation_probability=0.4):
+    mutate = mutation_probability / len(dna)  # scale chance to mutate by length of the sequence
+    new_dna = ''
+    bases = set('ACTG')
+    for base in dna:
+        if random() < mutate:
+            new_base = choice(list(bases - set(base.upper())))  # choose a random base that is different to the current one
+            if base.islower():
+                new_base = new_base.lower()
+        else:
+            new_base = base
+        new_dna += new_base
+    return new_dna
+
+
+if __name__ == '__main__':
+    if len(sys.argv) == 2:
+        dna = sys.argv[1]
+    else:
+        dna = 'GATACCA' * 6
+    
+    print(mutate(dna))
+```
+
+The special built-in Python variable `__name__` will hold the name of the module if `evolve.py` is used as a module, and if
+it is called as a script it will hold the value `__main__`. The code in the block that starts with `if __name__ == '__main__'`
+will thus only run if `evolve.py` is run as a script. This convention allows `evolve.py` to be a multi-use file, both a
+script and a module.
+
+To show how `evolve.py` can be used as a module, here is another script, `make_fasta.py`:
+
+```python
+#!/usr/bin/env python3
+
+import sys
+
+import evolve
+
+
+if __name__ == '__main__':
+    if len(sys.argv) == 2:
+        rate = float(sys.argv[1])
+    else:
+        rate = 0.4
+    base_sequence = "GGAATTGGTGACATGATTGAGGGGGCCGTTGAAGGGATTACTAAAAATGCATTGGTTCCC"
+    for i in range(20):
+        header = '>sample' + str(i+1) + '\n'
+        sequence = evolve.mutate(base_sequence, rate)
+        print(header + sequence)
+```
+
+In `make_fasta.py` the code in `evolve.py` is used as a module. Specifically the `mutate` function is used to make random mutations
+in a DNA string (specifically one taken from the poliovirus VP1 gene - you can see the protein it creates [at PDB](https://www.rcsb.org/3d-view/1EAH/1?preset=symmetry&symindex=0), it is the purple protein). The output from `mutate` is used in creating FASTA format
+records.
+
+### More sophisticated argument processing with argparse
+
+One further step in making your scripts work elegantly is to use `argparse` to handle command line parameters for you. Using the
+`argparse` module you can specify the parameters expect and have them neatly validated to make your script more robust. Here is an
+example of `argparse` in use, in a script `make_fasta_argparse.py`:
+
+```python
+#!/usr/bin/env python3
+
+import argparse
+
+import evolve
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--rate', type=float, default=0.4)
+    parser.add_argument('-n', '--num_sequences', type=int, default=20)
+    parser.add_argument('--dna', default="GGAATTGGTGACATGATTGAGGGGGCCGTTGAAGGGATTACTAAAAATGCATTGGTTCCC")
+    args = parser.parse_args()
+
+    base_sequence = args.dna
+    for i in range(args.num_sequences):
+        header = '>sample' + str(i+1) + '\n'
+        sequence = evolve.mutate(base_sequence, args.rate)
+        print(header + sequence)
+```
+
+The steps in using `argparse` are (besides the `import argparse` line):
+
+1. Set up the a parser object with `parser = argparser.ArgumentParser()`
+
+2. Add option and parameter definitions. Options start with a dash (`-`) for short options like `-n` and two dashes for long options like `--num_sequences`. Parameter definitions (not shown above) use names without leading dashes. Each parameter or option can have a type specified. If not type is specified it is considered to return a string value.
+
+3. Parser the command line and return an arguments object. The arguments object (`args` in the example above) stores the values from the command line in attributes named after the options and parameters, for example `args.num_sequences` above.
+
+There is an extensive [tutorial](https://docs.python.org/3/howto/argparse.html) available on using `argparse`, but here is another
+small example, `say_hello_argparse.py`:
+
+```python
+#!/usr/bin/env python3
+
+import argparse
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('name')
+    args = parser.parse_args()
+
+    print('Hello', args.name)
+```
+
+This example illustrates the use of a parameter which is not optional. If the user does not provide a command line parameter for `name`,
+the script will exit with an error.
+
+### File input and output with argparse
+
+As has previously been explained, Python scripts can only "return" an exit code (using `sys.exit`). As a result files are typically
+used as output (and often as input) for data to be processed by a script. The `argparse` module has some functions that
+make working with files easier.
+
+Recall that file paths are strings and files are objects. One has to `open()` a file path to access the contents of a file using
+a file object. Also recall that files have "modes" for reading and writing. All of these concepts are supported by `argparse`
+as this example, `to_upper.py`, illustrates:
+
+```python
+#!/usr/bin/env python3
+
+import argparse
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('input_file', type=argparse.FileType())
+    parser.add_argument('output_file', type=argparse.FileType('w'))
+    args = parser.parse_args()
+
+    for line in args.input_file:
+        output_line = line.upper()
+        args.output_file.write(output_line)
+```
+
+This script takes two parameters, `input_file` and `output_file`. Both are assigned to type `argparse.FileType()`. The `FileType` class
+is quite like `open()` in that it takes a file mode as a open option parameter, thus `FileType()` is a file for reading and `FileType('w')`
+is one for writing. The `argparse` module will try and open the files and print error messages if they cannot be opened appropriately.
+
+One final idiom is worth illustrating: sometimes the "default" output for a script should be `sys.stdout`, i.e. the terminal. Normally,
+however, parameters (as opposed to options) cannot be optional, but one can specify how many copies of a parameter are needed using
+`nargs` and `nargs='?'` is a bit like the `?` in regular expressions: it stands for one or zero parameters. Thus, `to_upper_optional.py`
+looks like this:
+
+```python
+#!/usr/bin/env python3
+
+import argparse
+import sys
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('input_file', type=argparse.FileType())
+    parser.add_argument('output_file', type=argparse.FileType('w'), nargs='?', default=sys.stdout)
+    args = parser.parse_args()
+
+    for line in args.input_file:
+        output_line = line.upper()
+        args.output_file.write(output_line)
+```
+
+A few points here:
+
+1. The default output is going to be `sys.stdout` thus the `sys` module needs to be imported.
+
+2. `sys.stdout` is a file object opened for writing, thus it is the same type as returned by `argparse.FileType('w')`
+
+3. As mentioned above `nargs='?'` makes the `'output_file'` parameter optional. It can only be used for the last parameter.
+
+The end result of this idiom is that if we run, for example:
+
+```bash
+python3 to_upper_optional.py myfile.txt
+```
+
+we will see the output of the script on the terminal.
+
+## In Conclusion
+
+Python scripts are self-contained pieces of code designed to interface with the command line. For ease of use they can
+be made executable and placed in a directory listed in the PATH. Each Python script is also, potentially a module and
+should be written with the "main" code protected by `if __name__ == "__main__":`.
+
+Command line parameters can be read using `sys.argv` but a more elegant solution is to use a module like `argparse`. The
+`argparse` module can convert command line parameters into types like `int` and `float` and even handle file input and output.
+
+The `argparse` module also allows for a distinction between options (starting with a `-` or `--`) and positional parameters on
+the command line.
+
+Finally, when writing scripts one typically wants to use a programmer's text editor like VSCode or an IDE like PyCharm. You can learn
+more about these tools in [this lesson](https://milliams.com/courses/ides_debugging/) from Matt Williams.
